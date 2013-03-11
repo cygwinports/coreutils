@@ -1,0 +1,36 @@
+NAME="coreutils"
+VERSION=8.15
+RELEASE=1
+CATEGORY="Base"
+SUMMARY="GNU core utilities"
+DESCRIPTION="The GNU Core Utilities are the basic file, shell and text
+manipulation utilities of the GNU operating system. These are the core
+utilities which are expected to exist on every operating system."
+HOMEPAGE="http://www.gnu.org/software/coreutils/"
+SRC_URI="mirror://gnu/coreutils/coreutils-${VERSION}.tar.xz"
+PATCH_URI="8.15-cygwin.patch"
+
+src_compile() {
+	cd ${S}
+	cygautoreconf
+	cd ${B}
+	cygconf	\
+		--program-transform-name=s/kill/gkill/ \
+		--enable-install-program=arch,hostname,su \
+		--enable-no-install-program=uptime \
+		--with-packager=Cygwin \
+		--with-packager-bug-reports=cygwin@cygwin.com \
+		--with-packager-version=${VERSION}-${RELEASE}
+
+	manifestize src/ginstall.exe
+	cygmake
+}
+
+src_install() {
+	cd ${B}
+	cyginstall
+
+	insinto /etc
+	newins ${S}/src/dircolors.hin DIR_COLORS
+	make_etc_defaults /etc/DIR_COLORS
+}
