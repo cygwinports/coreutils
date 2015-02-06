@@ -1,4 +1,4 @@
-Coreutils 8.23-4
+Coreutils 8.23-5
 ------------------------------------------
 GNU coreutils provides a collection of commonly used utilities essential
 to a standard POSIX environment.  It comprises the former textutils,
@@ -72,16 +72,16 @@ Language:
 ------------------------------------
 
 Build instructions:
-  unpack coreutils-8.23-4-src.tar.xz
+  unpack coreutils-8.23-5-src.tar.xz
     if you use setup to install this src package, it will be
     unpacked under /usr/src automatically
   cd /usr/src
   cygport coreutils.cygport all
 
 This will create:
-  /usr/src/coreutils-8.23-4.tar.xz
-  /usr/src/coreutils-8.23-4-src.tar.xz
-  /usr/src/coreutils-debuginfo-8.23-4.tar.xz
+  /usr/src/coreutils-8.23-5.tar.xz
+  /usr/src/coreutils-8.23-5-src.tar.xz
+  /usr/src/coreutils-debuginfo-8.23-5.tar.xz
 
 Or use 'cygport coreutils.cygport prep' to get a patched source directory
 
@@ -92,6 +92,9 @@ version at <http://cygwin.com/packages/>.
 ------------------
 
 Port Notes:
+
+----------  coreutils-8.23-5 -- 2015-02-06 ---------
+Enable stdbuf(1).
 
 ----------  coreutils-8.23-4 -- 2014-10-13 ---------
 Fix 'cp -rp dir1 dir2' regression.

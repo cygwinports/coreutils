@@ -222,16 +222,16 @@
  
  	version 8.23
 --- origsrc/coreutils-8.23/configure.ac	2014-07-17 18:40:57.000000000 -0700
-+++ src/coreutils-8.23/configure.ac	2014-10-13 08:30:37.165262300 -0700
-@@ -473,7 +473,7 @@ AC_COMPILE_IFELSE(
-   [stdbuf_supported=yes],
-   [stdbuf_supported=no])
- AC_MSG_RESULT([$stdbuf_supported])
--if test "$stdbuf_supported" = "yes"; then
-+if test "$stdbuf_supported" = "yes" && test -z "$EXEEXT"; then
-   gl_ADD_PROG([optional_bin_progs], [stdbuf])
- fi
- 
++++ src/coreutils-8.23/configure.ac	2015-02-06 11:12:45.136221200 -0600
+@@ -464,7 +464,7 @@ AC_COMPILE_IFELSE(
+     void __attribute__ ((constructor))
+     stdbuf_init (void)
+     {
+-      #if __ELF__
++      #if __ELF__ || defined(__CYGWIN__)
+         stdbuf = 1;
+       #endif
+     }]],[[
 --- origsrc/coreutils-8.23/doc/coreutils.texi	2014-07-13 15:09:52.000000000 -0700
 +++ src/coreutils-8.23/doc/coreutils.texi	2014-10-13 08:30:37.180881200 -0700
 @@ -7838,6 +7838,14 @@ These options change how file names them

@@ -7,7 +7,7 @@
 
 NAME=coreutils
 VERSION=8.23
-RELEASE=4
+RELEASE=5
 
 SUMMARY="GNU core utilities (includes fileutils, sh-utils and textutils)"
 DESCRIPTION="Common core utilities include: [ arch base64 basename cat
@@ -42,6 +42,8 @@ src_compile()
 {
   cd $S
   cygautoreconf
+  # FIXME: use libtool
+  sed -i -e 's|\(libstdbuf\.so\)$(EXEEXT)|\1|g' Makefile.in
   cd $B
   cygconf
   cygmake
@@ -74,6 +76,8 @@ src_install()
 {
   cd $B
   cyginstall
+  # FIXME: use libtool
+  mv ${D}/usr/libexec/${NAME}/libstdbuf.so{.exe,}
   mkdir -p $D/etc
   cp src/DIR_COLORS $D/etc/DIR_COLORS
   make_etc_defaults /etc/DIR_COLORS
