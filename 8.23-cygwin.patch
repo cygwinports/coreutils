@@ -1,6 +1,42 @@
---- origsrc/coreutils-8.15/ChangeLog	2012-01-06 10:28:25.000000000 -0700
-+++ src/coreutils-8.15/ChangeLog	2012-02-06 06:25:54.691714500 -0700
-@@ -1,3 +1,184 @@
+--- origsrc/coreutils-8.23/ChangeLog	2014-07-18 15:22:24.000000000 -0700
++++ src/coreutils-8.23/ChangeLog	2014-10-13 08:56:50.775188900 -0700
+@@ -1,3 +1,220 @@
++2014-10-13  U-WIN-RSJ0SJPBR3E\Administrator  <Administrator@WIN-KQ1OCEBI2E8>
++
++	Cygwin release 8.23-4
++	* src/copy.c (copy_internal): Fix typo that broke recursive copy
++	when dealing with directories.
++
++2014-09-24  Eric Blake  <eblake@redhat.com>
++
++	Cygwin release 8.23-3
++	* lib/cygwin.c (cygwin_spelling): Skip .exe magic if .exe is
++	already present.  Also honor .exe magic on symlinks.
++	* lib/same.c (same_name): Treat files as same if only difference
++	is .exe magic.
++	* src/copy.c (copy): Move symlink special casing here.
++	* src/install.c (strip): Update caller.
++	* src/ls.c (gobble_file): Likewise.
++	* src/stat.c (do_statfs, do_stat): Likewise.
++
++2014-08-12  Eric Blake  <eblake@redhat.com>
++
++	Cygwin release 8.23-2.
++	Drop hostname.
++
++2014-08-01  Eric Blake  <eblake@redhat.com>
++
++	Cygwin release 8.23-1.
++	* configure.ac: Disable stdbuf.
++	* lib/local.mk: Upstream switched to flat make, impacting how
++	we build local cygwin.c code.
++	* lib/canonicalize.c: Accepted upstream.
++	* lib/file-has-acl.c: Likewise.
++	* src/realpath.c: Likewise.
++	* src/su.c: Upstream dropped su.
++	* src/Makefile.am: Drop su changes.
++	* src/chroot.c: Adapt to new upstream code.
++
 +2012-02-04  Eric Blake  <eblake@redhat.com>
 +
 +	Cygwin release 8.15-1.
@@ -182,16 +218,27 @@
 +	* src/install.c (strip): Check for .exe here since strip doesn't.
 +
 +
- 2012-01-06  Jim Meyering  <meyering@redhat.com>
+ 2014-07-18  Pádraig Brady  <P@draigBrady.com>
  
- 	version 8.15
---- origsrc/coreutils-8.15/doc/coreutils.texi	2012-01-03 08:48:48.000000000 -0700
-+++ src/coreutils-8.15/doc/coreutils.texi	2012-02-04 13:13:39.656250000 -0700
-@@ -7328,6 +7328,14 @@ These options change how file names them
+ 	version 8.23
+--- origsrc/coreutils-8.23/configure.ac	2014-07-17 18:40:57.000000000 -0700
++++ src/coreutils-8.23/configure.ac	2014-10-13 08:30:37.165262300 -0700
+@@ -473,7 +473,7 @@ AC_COMPILE_IFELSE(
+   [stdbuf_supported=yes],
+   [stdbuf_supported=no])
+ AC_MSG_RESULT([$stdbuf_supported])
+-if test "$stdbuf_supported" = "yes"; then
++if test "$stdbuf_supported" = "yes" && test -z "$EXEEXT"; then
+   gl_ADD_PROG([optional_bin_progs], [stdbuf])
+ fi
+ 
+--- origsrc/coreutils-8.23/doc/coreutils.texi	2014-07-13 15:09:52.000000000 -0700
++++ src/coreutils-8.23/doc/coreutils.texi	2014-10-13 08:30:37.180881200 -0700
+@@ -7838,6 +7838,14 @@ These options change how file names them
  
  @table @samp
  
-+@itemx --append-exe
++@item --append-exe
 +@opindex --append-exe
 +@cindex appending exe on cygwin
 +Cygwin only: Cygwin normally performs @samp{.exe} magic, where a
@@ -202,11 +249,11 @@
  @item -b
  @itemx --escape
  @itemx --quoting-style=escape
-@@ -10963,6 +10971,14 @@ With this option, @command{stat} acts on
+@@ -11799,6 +11807,14 @@ With this option, @command{stat} acts on
  by each symbolic link argument.
  Without it, @command{stat} acts on any symbolic link argument directly.
  
-+@itemx --append-exe
++@item --append-exe
 +@opindex --append-exe
 +@cindex appending exe on cygwin
 +Cygwin only: Cygwin normally performs .exe magic, where a command line
@@ -217,80 +264,9 @@
  @item -f
  @itemx --file-system
  @opindex -f
---- origsrc/coreutils-8.15/lib/Makefile.am	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/lib/Makefile.am	2012-02-04 13:13:39.687500000 -0700
-@@ -33,5 +33,8 @@ AM_CFLAGS += $(GNULIB_WARN_CFLAGS) $(WER
- libcoreutils_a_SOURCES += \
-   buffer-lcm.c buffer-lcm.h
- 
-+libcoreutils_a_SOURCES += \
-+  cygwin.c cygwin.h
-+
- libcoreutils_a_LIBADD += $(LIBOBJS)
- libcoreutils_a_DEPENDENCIES += $(LIBOBJS)
---- origsrc/coreutils-8.15/lib/canonicalize.c	2012-01-06 02:14:31.000000000 -0700
-+++ src/coreutils-8.15/lib/canonicalize.c	2012-02-04 13:21:37.546875000 -0700
-@@ -145,8 +145,12 @@ canonicalize_filename_mode (const char *
-       rname_limit = rname + PATH_MAX;
-       rname[0] = '/';
-       dest = rname + 1;
--      if (DOUBLE_SLASH_IS_DISTINCT_ROOT && name[1] == '/')
--        *dest++ = '/';
-+      if (DOUBLE_SLASH_IS_DISTINCT_ROOT)
-+        {
-+          if (name[1] == '/' && name[2] != '/')
-+            *dest++ = '/';
-+          *dest = '\0';
-+        }
-     }
- 
-   for (start = name; *start; start = end)
-@@ -169,7 +173,7 @@ canonicalize_filename_mode (const char *
-           if (dest > rname + 1)
-             while ((--dest)[-1] != '/');
-           if (DOUBLE_SLASH_IS_DISTINCT_ROOT && dest == rname + 1
--              && *dest == '/')
-+              && *dest == '/' && dest[1] != '/')
-             dest++;
-         }
-       else
-@@ -267,8 +271,12 @@ canonicalize_filename_mode (const char *
-               if (buf[0] == '/')
-                 {
-                   dest = rname + 1;     /* It's an absolute symlink */
--                  if (DOUBLE_SLASH_IS_DISTINCT_ROOT && buf[1] == '/')
--                    *dest++ = '/';
-+                  if (DOUBLE_SLASH_IS_DISTINCT_ROOT)
-+                    {
-+                      if (buf[1] == '/' && buf[2] != '/')
-+                        *dest++ = '/';
-+                      *dest = '\0';
-+                    }
-                 }
-               else
-                 {
-@@ -277,7 +285,7 @@ canonicalize_filename_mode (const char *
-                   if (dest > rname + 1)
-                     while ((--dest)[-1] != '/');
-                   if (DOUBLE_SLASH_IS_DISTINCT_ROOT && dest == rname + 1
--                      && *dest == '/')
-+                      && *dest == '/' && dest[1] != '/')
-                     dest++;
-                 }
- 
-@@ -295,7 +303,8 @@ canonicalize_filename_mode (const char *
-     }
-   if (dest > rname + 1 && dest[-1] == '/')
-     --dest;
--  if (DOUBLE_SLASH_IS_DISTINCT_ROOT && dest == rname + 1 && *dest == '/')
-+  if (DOUBLE_SLASH_IS_DISTINCT_ROOT && dest == rname + 1
-+      && *dest == '/' && dest[1] != '/')
-     dest++;
-   *dest = '\0';
-   if (rname_limit != dest + 1)
---- origsrc/coreutils-8.15/lib/cygwin.c	1969-12-31 17:00:00.000000000 -0700
-+++ src/coreutils-8.15/lib/cygwin.c	2012-02-04 13:13:39.703125000 -0700
-@@ -0,0 +1,73 @@
+--- origsrc/coreutils-8.23/lib/cygwin.c	1969-12-31 16:00:00.000000000 -0800
++++ src/coreutils-8.23/lib/cygwin.c	2014-10-13 08:30:37.180881200 -0700
+@@ -0,0 +1,67 @@
 +/* cygwin.c - helper functions unique to Cygwin
 +
 +   Copyright (C) 2005, 2006, 2008, 2011 Free Software Foundation, Inc.
@@ -320,52 +296,46 @@
 +#include <string.h>
 +#include <unistd.h>
 +
-+/* Return -1 if PATH not found, 0 if PATH spelled correctly, and 1 if PATH
-+   had ".exe" automatically appended by cygwin.  Don't change errno.  */
++/* Return -1 if PATH is not found, 0 if PATH will not have .exe
++   appended (it is possible that a PATH that does not exist still
++   returns 0 instead of -1, or fails for a PATH that exists but cannot
++   be stat'ed), and positive if PATH has ".exe" automatically appended
++   by cygwin (1 if PATH is a symlink, 2 otherwise).  Won't change errno.  */
 +
 +int
 +cygwin_spelling (char const *path)
 +{
 +  int saved_errno = errno;
 +  int result = 0; /* Start with assumption that PATH is okay.  */
-+  int len = strlen (path);
++  int len;
++  struct stat st1;
++  struct stat st2;
++  char *path_exe;
 +
 +  if (! path || ! *path || len > PATH_MAX)
 +    /* PATH will cause EINVAL or ENAMETOOLONG, treat it as non-existing.  */
 +    return -1;
-+  if (path[len - 1] == '/')
-+    /* Don't change spelling if there is a trailing `/'.  */
++  len = strlen (path);
++  if (path[len - 1] == '/'
++      || (len > 4 && !strcasecmp (&path[len - 4], ".exe")))
++    /* Don't change spelling if there is a trailing `/' or '.exe'.  */
 +    return 0;
-+  if (readlink (path, NULL, 0) < 0)
-+    { /* PATH is not a symlink.  */
-+      if (errno == EINVAL)
-+	{ /* PATH exists.  */
-+	  char *path_exact = malloca (len + 5); /* adding ".exe" and NUL.  */
-+          struct stat st1;
-+          struct stat st2;
-+	  strcat (stpcpy (path_exact, path), ".exe");
-+          /* Avoid cost of double stat, if possible */
-+	  if (access (path_exact, F_OK) == 0
-+              && lstat (path_exact, &st1) == 0
-+              && lstat (path, &st2) == 0
-+              && st1.st_ino == st2.st_ino)
-+	    /* So does PATH.exe, with same inode, so append .exe.  */
-+	    result = 1;
-+	  freea (path_exact);
-+	}
-+      else
-+	/* PATH does not exist.  */
-+	result = -1;
++  if (lstat (path, &st1) < 0 || S_ISDIR(st1.st_mode))
++    {
++      errno = saved_errno;
++      return -1;
 +    }
-+  else
-+    { /* PATH is a symlink.  Don't append.  */
-+    }
++  path_exe = malloca (len + 5); /* adding ".exe" and NUL.  */
++  strcat (stpcpy (path_exe, path), ".exe");
++  if (lstat (path_exe, &st2) == 0 && st1.st_ino == st2.st_ino)
++    result = 1 + !S_ISLNK(st1.st_mode);
++  freea (path_exe);
 +
 +  errno = saved_errno;
 +  return result;
 +}
---- origsrc/coreutils-8.15/lib/cygwin.h	1969-12-31 17:00:00.000000000 -0700
-+++ src/coreutils-8.15/lib/cygwin.h	2012-02-04 13:13:39.703125000 -0700
+--- origsrc/coreutils-8.23/lib/cygwin.h	1969-12-31 16:00:00.000000000 -0800
++++ src/coreutils-8.23/lib/cygwin.h	2014-10-13 08:30:37.180881200 -0700
 @@ -0,0 +1,38 @@
 +/* cygwin.h - helper functions unique to Cygwin
 +
@@ -405,24 +375,8 @@
 +                    __name_orig), ".exe")
 +
 +#endif /* CYGWIN_H */
---- origsrc/coreutils-8.15/lib/file-has-acl.c	2012-01-06 00:20:50.000000000 -0700
-+++ src/coreutils-8.15/lib/file-has-acl.c	2012-02-04 13:13:39.703125000 -0700
-@@ -551,11 +551,11 @@ file_has_acl (char const *name, struct s
-             if (count == 0)
-               break;
- 
--            /* Don't use MIN_ACL_ENTRIES:  It's set to 4 on Cygwin, but Cygwin
-+            /* Use MIN_ACL_ENTRIES:  It's set to 4 on Cygwin, but Cygwin
-                returns only 3 entries for files with no ACL.  But this is safe:
-                If there are more than 4 entries, there cannot be only the
-                "user::", "group::", "other:", and "mask:" entries.  */
--            if (count > 4)
-+            return (count > 4);
-               return 1;
- 
-             entries = (aclent_t *) malloc (count * sizeof (aclent_t));
---- origsrc/coreutils-8.15/lib/hash-pjw.c	2012-01-06 00:20:50.000000000 -0700
-+++ src/coreutils-8.15/lib/hash-pjw.c	2012-02-04 13:13:50.328125000 -0700
+--- origsrc/coreutils-8.23/lib/hash-pjw.c	2014-05-29 05:05:50.000000000 -0700
++++ src/coreutils-8.23/lib/hash-pjw.c	2014-10-13 08:30:37.180881200 -0700
 @@ -19,6 +19,7 @@
  
  #include "hash-pjw.h"
@@ -448,34 +402,42 @@
 +
 +  return h % tablesize;
 +}
---- origsrc/coreutils-8.15/lib/hash-pjw.h	2012-01-06 00:20:50.000000000 -0700
-+++ src/coreutils-8.15/lib/hash-pjw.h	2012-02-04 13:23:03.203125000 -0700
+--- origsrc/coreutils-8.23/lib/hash-pjw.h	2014-05-29 05:05:50.000000000 -0700
++++ src/coreutils-8.23/lib/hash-pjw.h	2014-10-13 08:30:37.180881200 -0700
 @@ -21,3 +21,4 @@
     The result is platform dependent: it depends on the size of the 'size_t'
     type and on the signedness of the 'char' type.  */
  extern size_t hash_pjw (void const *x, size_t tablesize) _GL_ATTRIBUTE_PURE;
 +extern size_t hash_pjw_case (void const *x, size_t tablesize) _GL_ATTRIBUTE_PURE;
---- origsrc/coreutils-8.15/lib/hash-triple.c	2012-01-06 00:20:50.000000000 -0700
-+++ src/coreutils-8.15/lib/hash-triple.c	2012-02-04 13:13:50.375000000 -0700
-@@ -34,7 +34,14 @@ size_t
+--- origsrc/coreutils-8.23/lib/hash-triple.c	2014-05-29 05:05:50.000000000 -0700
++++ src/coreutils-8.23/lib/hash-triple.c	2014-10-13 08:30:37.180881200 -0700
+@@ -34,7 +34,13 @@ size_t
  triple_hash (void const *x, size_t table_size)
  {
    struct F_triple const *p = x;
-+#if ! __CYGWIN__
++#if !__CYGWIN__
    size_t tmp = hash_pjw (p->name, table_size);
-+#else /* __CYGWIN__ */
-+  /* Hash case-insensitively, to force collisions on names that differ
-+     by case, so that copy.c can then account for case-insensitive
-+     renames.  */
++#else // cygwin
++  /* Hash case-insensitively, to force collisions on names that differ by
++     case; copy.c can then account for case-insensitive renames. */
 +  size_t tmp = hash_pjw_case (p->name, table_size);
-+#endif /* __CYGWIN__ */
++#endif
  
    /* Ignoring the device number here should be fine.  */
    return (tmp ^ p->st_ino) % table_size;
---- origsrc/coreutils-8.15/lib/root-dev-ino.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/lib/root-dev-ino.c	2012-02-04 13:13:50.375000000 -0700
+--- origsrc/coreutils-8.23/lib/local.mk	2013-12-04 06:48:30.000000000 -0800
++++ src/coreutils-8.23/lib/local.mk	2014-10-13 08:30:37.180881200 -0700
+@@ -3,3 +3,6 @@ include lib/gnulib.mk
+ # Allow "make distdir" to succeed before "make all" has run.
+ dist-hook: $(noinst_LIBRARIES)
+ .PHONY: dist-hook
++
++# Hook in cygwin helper
++lib_libcoreutils_a_SOURCES += lib/cygwin.c lib/cygwin.h
+--- origsrc/coreutils-8.23/lib/root-dev-ino.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/lib/root-dev-ino.c	2014-10-13 08:30:37.180881200 -0700
 @@ -25,13 +25,17 @@
- /* Call lstat to get the device and inode numbers for `/'.
+ /* Call lstat to get the device and inode numbers for '/'.
     Upon failure, return NULL.  Otherwise, set the members of
     *ROOT_D_I accordingly and return ROOT_D_I.  */
 -struct dev_ino *
@@ -496,8 +458,8 @@
 +  root_d_i->double_slash.st_dev = statbuf.st_dev;
    return root_d_i;
  }
---- origsrc/coreutils-8.15/lib/root-dev-ino.h	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/lib/root-dev-ino.h	2012-02-04 13:13:50.375000000 -0700
+--- origsrc/coreutils-8.23/lib/root-dev-ino.h	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/lib/root-dev-ino.h	2014-10-13 08:30:37.180881200 -0700
 @@ -21,19 +21,26 @@
  # include "dev-ino.h"
  # include "same-inode.h"
@@ -529,64 +491,79 @@
          error (0, 0, _("it is dangerous to operate recursively on %s"),	\
                 quote (Dirname));					\
        else								\
---- origsrc/coreutils-8.15/lib/same.c	2012-01-06 00:20:50.000000000 -0700
-+++ src/coreutils-8.15/lib/same.c	2012-02-04 13:13:50.390625000 -0700
-@@ -40,6 +40,12 @@
+--- origsrc/coreutils-8.23/lib/same.c	2014-05-29 05:05:50.000000000 -0700
++++ src/coreutils-8.23/lib/same.c	2014-10-13 08:30:37.180881200 -0700
+@@ -40,6 +40,13 @@
  #include "error.h"
  #include "same-inode.h"
  
 +#if __CYGWIN__
 +# include <sys/cygwin.h>
++# include "cygwin.h"
++# include "malloca.h"
 +# include "memcasecmp.h"
-+# include "xalloc.h"
 +#endif
 +
  #ifndef MIN
  # define MIN(a, b) ((a) < (b) ? (a) : (b))
  #endif
-@@ -58,6 +64,30 @@ same_name (const char *source, const cha
-   bool identical_basenames =
+@@ -59,6 +66,45 @@ same_name (const char *source, const cha
      (source_baselen == dest_baselen
       && memcmp (source_basename, dest_basename, dest_baselen) == 0);
+   bool compare_dirs = identical_basenames;
 +#if __CYGWIN__
++  /* If two names differ case-insensitively by only an '.exe' suffix,
++     do some sleuthing to see if .exe magic matters on the shorter
++     name.  Swapping the longer name to dest avoids duplication.  */
++  if (source_baselen == dest_baselen + 4)
++    {
++      char const *tmp_basename = source_basename;
++      size_t tmp_baselen = source_baselen;
++      source_basename = dest_basename;
++      source_baselen = dest_baselen;
++      dest_basename = tmp_basename;
++      dest_baselen = tmp_baselen;
++    }
++  if (source_baselen + 4 == dest_baselen
++      && !memcasecmp (dest_basename - 4, ".exe", 4)
++      && !memcasecmp (source_basename, dest_basename, source_baselen)
++      && 0 < cygwin_spelling(source))
++    dest_baselen -= 4;
 +  /* Some, but not all, files are case-insensitive (depending on mount
 +     options, CYGWIN=case settings, and virtual file systems).  Do
 +     some sleuthing to decide whether case-insensitivity matters.  */
-+  if (! identical_basenames && source_baselen == dest_baselen)
++  if (! compare_dirs && source_baselen == dest_baselen)
 +    {
-+      ssize_t wsrclen = cygwin_conv_path (CCP_POSIX_TO_WIN_W | CCP_RELATIVE,
-+                                          source_basename, NULL, 0);
-+      ssize_t wdstlen = cygwin_conv_path (CCP_POSIX_TO_WIN_W | CCP_RELATIVE,
-+                                          dest_basename, NULL, 0);
-+      char *wsrc = xcharalloc (wsrclen);
-+      char *wdst = xcharalloc (wdstlen);
-+      if (cygwin_conv_path (CCP_POSIX_TO_WIN_W | CCP_RELATIVE, source_basename,
-+                            wsrc, wsrclen))
++      ssize_t wsrclen = cygwin_conv_path (CCP_POSIX_TO_WIN_W,
++                                          source, NULL, 0);
++      ssize_t wdstlen = cygwin_conv_path (CCP_POSIX_TO_WIN_W,
++                                          dest, NULL, 0);
++      char *wsrc = malloca (wsrclen);
++      char *wdst = malloca (wdstlen);
++      if (cygwin_conv_path (CCP_POSIX_TO_WIN_W, source, wsrc, wsrclen))
 +        error (EXIT_FAILURE, errno, "unable to convert path name %s", source);
-+      if (cygwin_conv_path (CCP_POSIX_TO_WIN_W | CCP_RELATIVE, dest_basename,
-+                            wdst, wdstlen))
++      if (cygwin_conv_path (CCP_POSIX_TO_WIN_W, dest, wdst, wdstlen))
 +        error (EXIT_FAILURE, errno, "unable to convert path name %s", dest);
 +      if (wsrclen == wdstlen && memcasecmp (wsrc, wdst, wsrclen) == 0)
-+        identical_basenames = true;
-+      free (wsrc);
-+      free (wdst);
++        compare_dirs = true;
++      freea (wsrc);
++      freea (wdst);
 +    }
 +#endif /* __CYGWIN__ */
-   bool compare_dirs = identical_basenames;
    bool same = false;
  
---- origsrc/coreutils-8.15/lib/xfreopen.c	2012-01-06 00:20:50.000000000 -0700
-+++ src/coreutils-8.15/lib/xfreopen.c	2012-02-04 13:13:50.390625000 -0700
-@@ -18,6 +18,8 @@
+ #if ! _POSIX_NO_TRUNC && HAVE_PATHCONF && defined _PC_NAME_MAX
+--- origsrc/coreutils-8.23/lib/xfreopen.c	2014-05-29 05:05:50.000000000 -0700
++++ src/coreutils-8.23/lib/xfreopen.c	2014-10-13 08:30:37.180881200 -0700
+@@ -18,6 +18,7 @@
  #include "xfreopen.h"
  
  #include <errno.h>
 +#include <fcntl.h>
-+
  #include "error.h"
  #include "exitfail.h"
  #include "quote.h"
-@@ -26,9 +28,17 @@
+@@ -26,9 +27,17 @@
  #include "gettext.h"
  #define _(msgid) gettext (msgid)
  
@@ -604,32 +581,18 @@
    if (!freopen (filename, mode, fp))
      {
        char const *f = (filename ? filename
---- origsrc/coreutils-8.15/src/Makefile.am	2012-01-03 08:48:48.000000000 -0700
-+++ src/coreutils-8.15/src/Makefile.am	2012-02-04 13:13:50.406250000 -0700
-@@ -436,7 +436,10 @@ install-exec-hook: su$(EXEEXT)
- 	    && chmod $(setuid_root_mode) $$TMPFILE > /dev/null 2>&1 \
- 	    && can_create_suid_root_executable=yes;		\
- 	  rm -f $$TMPFILE;					\
--	  if test $$can_create_suid_root_executable = yes; then \
-+##	  if test $$can_create_suid_root_executable = yes; then \
-+## On cygwin, root does not necessarily exist, suid doesn't work, and su can
-+## work securely from any account with enough privilege, so always install.
-+	  if :; then						\
- 	    $(install_su);					\
- 	  else							\
- 	    echo "WARNING: insufficient access; not installing su"; \
---- origsrc/coreutils-8.15/src/chcon.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/chcon.c	2012-02-04 13:13:50.406250000 -0700
+--- origsrc/coreutils-8.23/src/chcon.c	2014-07-13 15:09:52.000000000 -0700
++++ src/coreutils-8.23/src/chcon.c	2014-10-13 08:30:37.180881200 -0700
 @@ -48,7 +48,7 @@ static bool verbose;
  
- /* Pointer to the device and inode numbers of `/', when --recursive.
+ /* Pointer to the device and inode numbers of '/', when --recursive.
     Otherwise NULL.  */
 -static struct dev_ino *root_dev_ino;
 +static struct root_dev_ino *root_dev_ino;
  
  /* The name of the context file is being given. */
  static char const *specified_context;
-@@ -567,7 +567,7 @@ main (int argc, char **argv)
+@@ -569,7 +569,7 @@ main (int argc, char **argv)
  
    if (recurse && preserve_root)
      {
@@ -638,9 +601,9 @@
        root_dev_ino = get_root_dev_ino (&dev_ino_buf);
        if (root_dev_ino == NULL)
          error (EXIT_FAILURE, errno, _("failed to get attributes of %s"),
---- origsrc/coreutils-8.15/src/chgrp.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/chgrp.c	2012-02-04 13:13:50.421875000 -0700
-@@ -300,7 +300,7 @@ main (int argc, char **argv)
+--- origsrc/coreutils-8.23/src/chgrp.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/chgrp.c	2014-10-13 08:30:37.180881200 -0700
+@@ -299,7 +299,7 @@ main (int argc, char **argv)
  
    if (chopt.recurse && preserve_root)
      {
@@ -649,18 +612,18 @@
        chopt.root_dev_ino = get_root_dev_ino (&dev_ino_buf);
        if (chopt.root_dev_ino == NULL)
          error (EXIT_FAILURE, errno, _("failed to get attributes of %s"),
---- origsrc/coreutils-8.15/src/chmod.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/chmod.c	2012-02-04 13:13:50.437500000 -0700
+--- origsrc/coreutils-8.23/src/chmod.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/chmod.c	2014-10-13 08:30:37.180881200 -0700
 @@ -81,7 +81,7 @@ static enum Verbosity verbosity = V_off;
  
- /* Pointer to the device and inode numbers of `/', when --recursive.
+ /* Pointer to the device and inode numbers of '/', when --recursive.
     Otherwise NULL.  */
 -static struct dev_ino *root_dev_ino;
 +static struct root_dev_ino *root_dev_ino;
  
  /* For long options that have no equivalent short option, use a
     non-character as a pseudo short option, starting with CHAR_MAX + 1.  */
-@@ -547,7 +547,7 @@ main (int argc, char **argv)
+@@ -552,7 +552,7 @@ main (int argc, char **argv)
  
    if (recurse && preserve_root)
      {
@@ -669,20 +632,20 @@
        root_dev_ino = get_root_dev_ino (&dev_ino_buf);
        if (root_dev_ino == NULL)
          error (EXIT_FAILURE, errno, _("failed to get attributes of %s"),
---- origsrc/coreutils-8.15/src/chown-core.h	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/chown-core.h	2012-02-04 13:13:50.437500000 -0700
+--- origsrc/coreutils-8.23/src/chown-core.h	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/chown-core.h	2014-10-13 08:30:37.196451900 -0700
 @@ -50,7 +50,7 @@ struct Chown_option
  
-   /* Pointer to the device and inode numbers of `/', when --recursive.
+   /* Pointer to the device and inode numbers of '/', when --recursive.
       Need not be freed.  Otherwise NULL.  */
 -  struct dev_ino *root_dev_ino;
 +  struct root_dev_ino *root_dev_ino;
  
    /* This corresponds to the --dereference (opposite of -h) option.  */
    bool affect_symlink_referent;
---- origsrc/coreutils-8.15/src/chown.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/chown.c	2012-02-04 13:13:50.437500000 -0700
-@@ -314,7 +314,7 @@ main (int argc, char **argv)
+--- origsrc/coreutils-8.23/src/chown.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/chown.c	2014-10-13 08:30:37.196451900 -0700
+@@ -312,7 +312,7 @@ main (int argc, char **argv)
  
    if (chopt.recurse && preserve_root)
      {
@@ -691,9 +654,29 @@
        chopt.root_dev_ino = get_root_dev_ino (&dev_ino_buf);
        if (chopt.root_dev_ino == NULL)
          error (EXIT_FAILURE, errno, _("failed to get attributes of %s"),
---- origsrc/coreutils-8.15/src/cksum.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/cksum.c	2012-02-04 13:13:50.484375000 -0700
-@@ -298,6 +298,9 @@ main (int argc, char **argv)
+--- origsrc/coreutils-8.23/src/chroot.c	2014-07-13 16:59:20.000000000 -0700
++++ src/coreutils-8.23/src/chroot.c	2014-10-13 08:30:37.196451900 -0700
+@@ -163,7 +163,7 @@ parse_additional_groups (char const *gro
+ static bool
+ is_root (const char* dir)
+ {
+-  struct dev_ino root_ino;
++  struct root_dev_ino root_ino;
+   if (! get_root_dev_ino (&root_ino))
+     error (EXIT_CANCELED, errno, _("failed to get attributes of %s"),
+            quote ("/"));
+@@ -173,7 +173,7 @@ is_root (const char* dir)
+     error (EXIT_CANCELED, errno, _("failed to get attributes of %s"),
+            quote (dir));
+ 
+-  return SAME_INODE (root_ino, arg_st);
++  return ROOT_DEV_INO_CHECK (&root_ino, &arg_st);
+ }
+ 
+ void
+--- origsrc/coreutils-8.23/src/cksum.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/cksum.c	2014-10-13 08:30:37.196451900 -0700
+@@ -301,6 +301,9 @@ main (int argc, char **argv)
  
    have_read_stdin = false;
  
@@ -703,9 +686,9 @@
    if (optind == argc)
      ok = cksum ("-", false);
    else
---- origsrc/coreutils-8.15/src/copy.c	2012-01-05 07:24:19.000000000 -0700
-+++ src/coreutils-8.15/src/copy.c	2012-02-04 13:13:50.500000000 -0700
-@@ -66,6 +66,10 @@
+--- origsrc/coreutils-8.23/src/copy.c	2014-07-13 15:09:52.000000000 -0700
++++ src/coreutils-8.23/src/copy.c	2014-10-13 08:49:30.450181800 -0700
+@@ -70,6 +70,10 @@
  # include "verror.h"
  #endif
  
@@ -716,20 +699,20 @@
  #ifndef HAVE_FCHOWN
  # define HAVE_FCHOWN false
  # define fchown(fd, uid, gid) (-1)
-@@ -1196,7 +1200,11 @@ close_src_desc:
+@@ -1313,7 +1317,11 @@ close_src_desc:
  static bool
  same_file_ok (char const *src_name, struct stat const *src_sb,
                char const *dst_name, struct stat const *dst_sb,
 -              const struct cp_options *x, bool *return_now, bool *unlink_src)
 +              const struct cp_options *x, bool *return_now, bool *unlink_src
 +#if __CYGWIN__
-+              , bool *case_change
-+#endif /* __CYGWIN__ */
-+              )
++	      , bool *case_change
++#endif
++	      )
  {
    const struct stat *src_sb_link;
    const struct stat *dst_sb_link;
-@@ -1321,6 +1329,18 @@ same_file_ok (char const *src_name, stru
+@@ -1461,6 +1469,18 @@ same_file_ok (char const *src_name, stru
        if (S_ISLNK (dst_sb_link->st_mode))
          return true;
  
@@ -748,7 +731,7 @@
        if (same_link
            && 1 < dst_sb_link->st_nlink
            && ! same_name (src_name, dst_name))
-@@ -1617,10 +1637,20 @@ copy_internal (char const *src_name, cha
+@@ -1813,10 +1833,20 @@ copy_internal (char const *src_name, cha
           && ! (x->move_mode || x->symbolic_link || x->hard_link
                 || x->backup_type != no_backups
                 || x->unlink_dest_before_opening));
@@ -761,7 +744,7 @@
 +                 : lstat (dst_name, &dst_sb));
 +#if __CYGWIN__
 +      /* stat("a") succeeds even if it was really "a.exe".  */
-+      if (! res && cygwin_spelling (dst_name) != 0)
++      if (! res && 0 < cygwin_spelling (dst_name))
 +        {
 +          /* Only DST_NAME.exe exists, but we want the non-existant
 +             DST_NAME.  */
@@ -773,7 +756,7 @@
          {
            if (errno != ENOENT)
              {
-@@ -1637,10 +1667,17 @@ copy_internal (char const *src_name, cha
+@@ -1833,10 +1863,17 @@ copy_internal (char const *src_name, cha
               that it is stat'able or lstat'able.  */
            bool return_now;
            bool unlink_src;
@@ -787,12 +770,12 @@
 +                              x, &return_now, &unlink_src
 +#if __CYGWIN__
 +                              , &case_change
-+#endif /* __CYGWIN__ */
-+                              ))
++#endif
++))
              {
                error (0, 0, _("%s and %s are the same file"),
                       quote_n (0, src_name), quote_n (1, dst_name));
-@@ -1699,6 +1736,9 @@ copy_internal (char const *src_name, cha
+@@ -1895,6 +1932,9 @@ copy_internal (char const *src_name, cha
               cp and mv treat -i and -f differently.  */
            if (x->move_mode)
              {
@@ -802,7 +785,7 @@
                if (abandon_move (x, dst_name, &dst_sb)
                    || (unlink_src && unlink (src_name) == 0))
                  {
-@@ -1859,7 +1899,11 @@ copy_internal (char const *src_name, cha
+@@ -2058,7 +2098,11 @@ copy_internal (char const *src_name, cha
                     /* Never unlink dst_name when in move mode.  */
                     && ! x->move_mode
                     && (x->unlink_dest_before_opening
@@ -811,25 +794,25 @@
 +#if __CYGWIN__
 +                           && !case_change
 +#endif /* __CYGWIN__ */
-+                           )
++			   )
                         || (x->dereference == DEREF_NEVER
                             && ! S_ISREG (src_sb.st_mode))
                         ))
-@@ -2601,6 +2645,21 @@ copy (char const *src_name, char const *
+@@ -2816,6 +2860,21 @@ copy (char const *src_name, char const *
  {
    assert (valid_options (options));
  
 +#if __CYGWIN__
-+  /* .exe magic - if src exists with an implicit .exe suffix, but dst
-+     does not exist and was also specified without a suffix, then
-+     append .exe to dst.  */
++  /* .exe magic - if src exists with an implicit .exe suffix and is
++     not a symlink, but dst does not exist and was also specified
++     without a suffix, then append .exe to dst.  */
 +  int cygwin = cygwin_spelling (src_name);
 +  char *p;
-+  if (cygwin == 1
++  if (cygwin == 2
 +      && ((p = strchr (dst_name, '\0') - 4) <= dst_name
 +          || strcasecmp (p, ".exe") != 0))
 +    {
-+      cygwin = 2;
++      cygwin = 3;
 +      CYGWIN_APPEND_EXE (p, dst_name);
 +    }
 +#endif /* __CYGWIN__ */
@@ -837,26 +820,26 @@
    /* Record the file names: they're used in case of error, when copying
       a directory into itself.  I don't like to make these tools do *any*
       extra work in the common case when that work is solely to handle
-@@ -2612,10 +2671,15 @@ copy (char const *src_name, char const *
+@@ -2827,10 +2886,15 @@ copy (char const *src_name, char const *
    top_level_dst_name = dst_name;
  
    bool first_dir_created_per_command_line_arg = false;
--  return copy_internal (src_name, dst_name, nonexistent_dst, 0, NULL,
-+  bool result = copy_internal (src_name, dst_name, nonexistent_dst, 0, NULL,
+-  return copy_internal (src_name, dst_name, nonexistent_dst, NULL, NULL,
++  bool result = copy_internal (src_name, dst_name, nonexistent_dst, NULL, NULL,
                          options, true,
                          &first_dir_created_per_command_line_arg,
                          copy_into_self, rename_succeeded);
 +#if __CYGWIN__
-+  if (cygwin == 2)
++  if (cygwin == 3)
 +    freea ((char *) dst_name);
 +#endif /* __CYGWIN__ */
 +  return result;
  }
  
  /* Set *X to the default options for a value of type struct cp_options.  */
---- origsrc/coreutils-8.15/src/dd.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/dd.c	2012-02-04 13:13:50.546875000 -0700
-@@ -36,6 +36,10 @@
+--- origsrc/coreutils-8.23/src/dd.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/dd.c	2014-10-13 08:30:37.196451900 -0700
+@@ -37,6 +37,10 @@
  #include "xstrtol.h"
  #include "xtime.h"
  
@@ -864,10 +847,10 @@
 +# include <io.h>
 +#endif
 +
- /* The official name of this program (e.g., no `g' prefix).  */
+ /* The official name of this program (e.g., no 'g' prefix).  */
  #define PROGRAM_NAME "dd"
  
-@@ -1663,6 +1667,13 @@ copy_with_unblock (char const *buf, size
+@@ -1862,6 +1866,13 @@ copy_with_unblock (char const *buf, size
  static void
  set_fd_flags (int fd, int add_flags, char const *name)
  {
@@ -881,16 +864,16 @@
    /* Ignore file creation flags that are no-ops on file descriptors.  */
    add_flags &= ~ (O_NOCTTY | O_NOFOLLOW);
  
-@@ -2039,6 +2050,8 @@ main (int argc, char **argv)
+@@ -2242,6 +2253,8 @@ main (int argc, char **argv)
      }
    else
      {
 +      if ((input_flags & (O_BINARY | O_TEXT)) == 0)
 +	input_flags |= O_BINARY;
        if (fd_reopen (STDIN_FILENO, input_file, O_RDONLY | input_flags, 0) < 0)
-         error (EXIT_FAILURE, errno, _("opening %s"), quote (input_file));
+         error (EXIT_FAILURE, errno, _("failed to open %s"), quote (input_file));
      }
-@@ -2061,6 +2074,8 @@ main (int argc, char **argv)
+@@ -2264,6 +2277,8 @@ main (int argc, char **argv)
             | (conversions_mask & C_NOCREAT ? 0 : O_CREAT)
             | (conversions_mask & C_EXCL ? O_EXCL : 0)
             | (seek_records || (conversions_mask & C_NOTRUNC) ? 0 : O_TRUNC));
@@ -898,10 +881,10 @@
 +        opts |= O_BINARY;
  
        /* Open the output file with *read* access only if we might
-          need to read to satisfy a `seek=' request.  If we can't read
---- origsrc/coreutils-8.15/src/dircolors.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/dircolors.c	2012-02-04 13:13:50.546875000 -0700
-@@ -495,8 +495,12 @@ to select a shell syntax are mutually ex
+          need to read to satisfy a 'seek=' request.  If we can't read
+--- origsrc/coreutils-8.23/src/dircolors.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/dircolors.c	2014-10-13 08:30:37.196451900 -0700
+@@ -494,8 +494,12 @@ main (int argc, char **argv)
              }
            else
              {
@@ -915,8 +898,8 @@
              }
            fputs (prefix, stdout);
            fwrite (s, 1, len, stdout);
---- origsrc/coreutils-8.15/src/install.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/install.c	2012-02-04 13:13:50.562500000 -0700
+--- origsrc/coreutils-8.23/src/install.c	2014-07-13 15:09:52.000000000 -0700
++++ src/coreutils-8.23/src/install.c	2014-10-13 08:30:37.196451900 -0700
 @@ -44,6 +44,10 @@
  #include "utimens.h"
  #include "xstrtol.h"
@@ -925,11 +908,11 @@
 +# include "cygwin.h"
 +#endif
 +
- /* The official name of this program (e.g., no `g' prefix).  */
+ /* The official name of this program (e.g., no 'g' prefix).  */
  #define PROGRAM_NAME "install"
  
-@@ -526,6 +530,16 @@ strip (char const *name)
-       error (EXIT_FAILURE, errno, _("fork system call failed"));
+@@ -531,6 +535,16 @@ strip (char const *name)
+       error (0, errno, _("fork system call failed"));
        break;
      case 0:			/* Child. */
 +#if __CYGWIN__
@@ -938,16 +921,16 @@
 +	char *p;
 +	if (((p = strchr (name, '\0') - 4) <= name
 +	     || strcasecmp (p, ".exe") != 0)
-+	    && cygwin_spelling (name) > 0)
++	    && 0 < cygwin_spelling (name))
 +          CYGWIN_APPEND_EXE (p, name);
 +      }
 +#endif /* __CYGWIN__ */
        execlp (strip_program, strip_program, name, NULL);
        error (EXIT_FAILURE, errno, _("cannot run %s"), strip_program);
        break;
---- origsrc/coreutils-8.15/src/ls.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/ls.c	2012-02-04 13:13:50.609375000 -0700
-@@ -116,6 +116,10 @@
+--- origsrc/coreutils-8.23/src/ls.c	2014-07-13 15:09:52.000000000 -0700
++++ src/coreutils-8.23/src/ls.c	2014-10-13 08:30:37.196451900 -0700
+@@ -117,6 +117,10 @@
  # include <sys/capability.h>
  #endif
  
@@ -958,19 +941,19 @@
  #define PROGRAM_NAME (ls_mode == LS_LS ? "ls" \
                        : (ls_mode == LS_MULTI_COL \
                           ? "dir" : "vdir"))
-@@ -746,6 +750,11 @@ static char const *long_time_format[2] =
+@@ -747,6 +751,11 @@ static char const *long_time_format[2] =
      N_("%b %e %H:%M")
    };
  
 +#if __CYGWIN__
 +/* Whether .exe should be appended to command-line args as needed.  */
-+static bool append_exe = false;
++static bool append_exe;
 +#endif /* __CYGWIN__ */
 +
  /* The set of signals that are caught.  */
  
  static sigset_t caught_signals;
-@@ -781,6 +790,9 @@ enum
+@@ -782,6 +791,9 @@ enum
  enum
  {
    AUTHOR_OPTION = CHAR_MAX + 1,
@@ -980,7 +963,7 @@
    BLOCK_SIZE_OPTION,
    COLOR_OPTION,
    DEREFERENCE_COMMAND_LINE_SYMLINK_TO_DIR_OPTION,
-@@ -842,6 +854,9 @@ static struct option const long_options[
+@@ -843,6 +855,9 @@ static struct option const long_options[
    {"block-size", required_argument, NULL, BLOCK_SIZE_OPTION},
    {"context", no_argument, 0, 'Z'},
    {"author", no_argument, NULL, AUTHOR_OPTION},
@@ -990,7 +973,7 @@
    {GETOPT_HELP_OPTION_DECL},
    {GETOPT_VERSION_OPTION_DECL},
    {NULL, 0, NULL, 0}
-@@ -1945,6 +1960,12 @@ decode_switches (int argc, char **argv)
+@@ -1954,6 +1969,12 @@ decode_switches (int argc, char **argv)
            print_scontext = true;
            break;
  
@@ -1003,20 +986,20 @@
          case_GETOPT_HELP_CHAR;
  
          case_GETOPT_VERSION_CHAR (PROGRAM_NAME, AUTHORS);
-@@ -2789,6 +2810,12 @@ gobble_file (char const *name, enum file
+@@ -2924,6 +2945,12 @@ gobble_file (char const *name, enum file
    uintmax_t blocks = 0;
    struct fileinfo *f;
  
 +#if __CYGWIN__
 +  char *name_alt = NULL;
-+  if (command_line_arg && append_exe && cygwin_spelling (name) == 1)
++  if (command_line_arg && append_exe && 0 < cygwin_spelling (name))
 +    CYGWIN_APPEND_EXE (name_alt, name);
 +#endif /* __CYGWIN__ */
 +
    /* An inode value prior to gobble_file necessarily came from readdir,
       which is not used for command line arguments.  */
    assert (! command_line_arg || inode == NOT_AN_INODE_NUMBER);
-@@ -2900,11 +2927,19 @@ gobble_file (char const *name, enum file
+@@ -3035,11 +3062,19 @@ gobble_file (char const *name, enum file
            file_failure (command_line_arg,
                          _("cannot access %s"), absolute_name);
            if (command_line_arg)
@@ -1037,7 +1020,7 @@
            return 0;
          }
  
-@@ -3092,6 +3127,9 @@ gobble_file (char const *name, enum file
+@@ -3223,6 +3258,9 @@ gobble_file (char const *name, enum file
    f->name = xstrdup (name);
    cwd_n_used++;
  
@@ -1047,8 +1030,8 @@
    return blocks;
  }
  
-@@ -4789,6 +4827,11 @@ Mandatory arguments to long options are
-   -Z, --context              print any SELinux security context of each file\n\
+@@ -4923,6 +4961,11 @@ Sort entries alphabetically if none of -
+   -Z, --context              print any security context of each file\n\
    -1                         list one file per line\n\
  "), stdout);
 +#if __CYGWIN__
@@ -1059,9 +1042,9 @@
        fputs (HELP_OPTION_DESCRIPTION, stdout);
        fputs (VERSION_OPTION_DESCRIPTION, stdout);
        emit_size_note ();
---- origsrc/coreutils-8.15/src/md5sum.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/md5sum.c	2012-02-04 13:13:50.625000000 -0700
-@@ -741,6 +741,9 @@ main (int argc, char **argv)
+--- origsrc/coreutils-8.23/src/md5sum.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/md5sum.c	2014-10-13 08:30:37.212072800 -0700
+@@ -813,6 +813,9 @@ main (int argc, char **argv)
    if (optind == argc)
      argv[argc++] = bad_cast ("-");
  
@@ -1071,9 +1054,9 @@
    for (; optind < argc; ++optind)
      {
        char *file = argv[optind];
---- origsrc/coreutils-8.15/src/mv.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/mv.c	2012-02-04 13:13:50.625000000 -0700
-@@ -90,7 +90,7 @@ rm_option_init (struct rm_options *x)
+--- origsrc/coreutils-8.23/src/mv.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/mv.c	2014-10-13 08:30:37.212072800 -0700
+@@ -92,7 +92,7 @@ rm_option_init (struct rm_options *x)
    x->require_restore_cwd = true;
  
    {
@@ -1082,7 +1065,7 @@
      x->root_dev_ino = get_root_dev_ino (&dev_ino_buf);
      if (x->root_dev_ino == NULL)
        error (EXIT_FAILURE, errno, _("failed to get attributes of %s"),
-@@ -452,6 +452,16 @@ main (int argc, char **argv)
+@@ -467,6 +467,16 @@ main (int argc, char **argv)
    else if (!target_directory)
      {
        assert (2 <= n_files);
@@ -1099,9 +1082,9 @@
        if (target_directory_operand (file[n_files - 1]))
          target_directory = file[--n_files];
        else if (2 < n_files)
---- origsrc/coreutils-8.15/src/pwd.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/pwd.c	2012-02-04 13:13:50.640625000 -0700
-@@ -266,8 +266,8 @@ static void
+--- origsrc/coreutils-8.23/src/pwd.c	2014-07-13 15:09:52.000000000 -0700
++++ src/coreutils-8.23/src/pwd.c	2014-10-13 08:30:37.212072800 -0700
+@@ -268,8 +268,8 @@ static void
  robust_getcwd (struct file_name *file_name)
  {
    size_t height = 1;
@@ -1112,7 +1095,7 @@
    struct stat dot_sb;
  
    if (root_dev_ino == NULL)
-@@ -280,7 +280,7 @@ robust_getcwd (struct file_name *file_na
+@@ -282,7 +282,7 @@ robust_getcwd (struct file_name *file_na
    while (1)
      {
        /* If we've reached the root, we're done.  */
@@ -1121,7 +1104,7 @@
          break;
  
        find_dir_entry (&dot_sb, file_name, height++);
-@@ -289,6 +289,9 @@ robust_getcwd (struct file_name *file_na
+@@ -291,6 +291,9 @@ robust_getcwd (struct file_name *file_na
    /* See if a leading slash is needed; file_name_prepend adds one.  */
    if (file_name->start[0] == '\0')
      file_name_prepend (file_name, "", 0);
@@ -1131,121 +1114,20 @@
  }
  
  
---- origsrc/coreutils-8.15/src/realpath.c	2012-01-03 08:48:48.000000000 -0700
-+++ src/coreutils-8.15/src/realpath.c	2012-02-04 16:48:24.781250000 -0700
-@@ -26,7 +26,7 @@
- #include "error.h"
- #include "quote.h"
+--- origsrc/coreutils-8.23/src/remove.h	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/remove.h	2014-10-13 08:30:37.212072800 -0700
+@@ -54,7 +54,7 @@ struct rm_options
  
--/* The official name of this program (e.g., no `g' prefix).  */
-+/* The official name of this program (e.g., no 'g' prefix).  */
- #define PROGRAM_NAME "realpath"
- 
- #define AUTHORS proper_name_utf8 ("Padraig Brady", "P\303\241draig Brady")
-@@ -77,7 +77,7 @@ all but the last component must exist\n\
-       fputs (_("\
-   -e, --canonicalize-existing  all components of the path must exist\n\
-   -m, --canonicalize-missing   no components of the path need exist\n\
--  -L, --logical                resolve `..' components before symlinks\n\
-+  -L, --logical                resolve '..' components before symlinks\n\
-   -P, --physical               resolve symlinks as encountered (default)\n\
-   -q, --quiet                  suppress most error messages\n\
-       --relative-to=FILE       print the resolved path relative to FILE\n\
-@@ -132,12 +132,16 @@ path_common_prefix (const char *path1, c
-   int i = 0;
-   int ret = 0;
- 
-+  if (DOUBLE_SLASH_IS_DISTINCT_ROOT && *path1 == '/' && *path2 == '/'
-+      && (path1[1] == '/') != (path2[1] == '/'))
-+    return 0;
-+
-   while (*path1 && *path2)
-     {
-       if (*path1 != *path2)
-         break;
-       if (*path1 == '/')
--        ret = i;
-+        ret = i + 1;
-       path1++;
-       path2++;
-       i++;
-@@ -169,33 +173,43 @@ relpath (const char *can_fname)
- 
-       /* Skip the prefix common to --relative-to and path.  */
-       int common_index = path_common_prefix (can_relative_to, can_fname);
-+      if (!common_index)
-+        return false;
-+
-       const char *relto_suffix = can_relative_to + common_index;
-       const char *fname_suffix = can_fname + common_index;
- 
-+      /* skip over extraneous '/'.  */
-+      if (*relto_suffix == '/')
-+        relto_suffix++;
-+      if (*fname_suffix == '/')
-+        fname_suffix++;
-+
-       /* Replace remaining components of --relative-to with '..', to get
-          to a common directory.  Then output the remainder of fname.  */
-       if (*relto_suffix)
-         {
--          ++relto_suffix;
--          printf ("%s", "..");
-+          fputs ("..", stdout);
-           for (; *relto_suffix; ++relto_suffix)
-             {
-               if (*relto_suffix == '/')
--                printf ("%s", "/..");
-+                fputs ("/..", stdout);
-             }
- 
--          printf ("%s", fname_suffix);
-+          if (*fname_suffix)
-+            {
-+              putchar ('/');
-+              fputs (fname_suffix, stdout);
-+            }
-         }
-       else
-         {
-           if (*fname_suffix)
--            printf ("%s", ++fname_suffix);
-+            fputs (fname_suffix, stdout);
-           else
--            printf ("%c", '.');
-+            putchar ('.');
-         }
- 
--      putchar (use_nuls ? '\0' : '\n');
--
-       return true;
-     }
- 
-@@ -223,7 +237,9 @@ process_path (const char *fname, int can
-     }
- 
-   if (!relpath (can_fname))
--    printf ("%s%c", can_fname, (use_nuls ? '\0' : '\n'));
-+    fputs (can_fname, stdout);
-+
-+  putchar (use_nuls ? '\0' : '\n');
- 
-   free (can_fname);
- 
---- origsrc/coreutils-8.15/src/remove.h	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/remove.h	2012-02-04 13:13:50.671875000 -0700
-@@ -51,7 +51,7 @@ struct rm_options
- 
-   /* Pointer to the device and inode numbers of `/', when --recursive
-      and preserving `/'.  Otherwise NULL.  */
+   /* Pointer to the device and inode numbers of '/', when --recursive
+      and preserving '/'.  Otherwise NULL.  */
 -  struct dev_ino *root_dev_ino;
 +  struct root_dev_ino *root_dev_ino;
  
    /* If nonzero, stdin is a tty.  */
    bool stdin_tty;
---- origsrc/coreutils-8.15/src/rm.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/rm.c	2012-02-04 13:13:50.687500000 -0700
-@@ -319,7 +319,7 @@ main (int argc, char **argv)
+--- origsrc/coreutils-8.23/src/rm.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/rm.c	2014-10-13 08:30:37.212072800 -0700
+@@ -325,7 +325,7 @@ main (int argc, char **argv)
  
    if (x.recursive && preserve_root)
      {
@@ -1254,8 +1136,8 @@
        x.root_dev_ino = get_root_dev_ino (&dev_ino_buf);
        if (x.root_dev_ino == NULL)
          error (EXIT_FAILURE, errno, _("failed to get attributes of %s"),
---- origsrc/coreutils-8.15/src/stat.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/stat.c	2012-02-04 13:13:50.687500000 -0700
+--- origsrc/coreutils-8.23/src/stat.c	2014-07-11 04:00:07.000000000 -0700
++++ src/coreutils-8.23/src/stat.c	2014-10-13 08:30:37.212072800 -0700
 @@ -73,6 +73,13 @@
  #include "find-mount-point.h"
  #include "xvasprintf.h"
@@ -1263,14 +1145,14 @@
 +#if __CYGWIN__
 +# include "cygwin.h"
 +/* Whether .exe should be appended to command-line args as needed.  */
-+static bool append_exe = false;
++static bool append_exe;
 +# define APPEND_EXE_OPTION 10000
 +#endif
 +
  #if USE_STATVFS
  # define STRUCT_STATVFS struct statvfs
  # define STRUCT_STATXFS_F_FSID_IS_INTEGER STRUCT_STATVFS_F_FSID_IS_INTEGER
-@@ -181,6 +188,9 @@ static struct option const long_options[
+@@ -189,6 +196,9 @@ static struct option const long_options[
    {"format", required_argument, NULL, 'c'},
    {"printf", required_argument, NULL, PRINTF_OPTION},
    {"terse", no_argument, NULL, 't'},
@@ -1280,13 +1162,13 @@
    {GETOPT_HELP_OPTION_DECL},
    {GETOPT_VERSION_OPTION_DECL},
    {NULL, 0, NULL, 0}
-@@ -1178,14 +1188,26 @@ do_statfs (char const *filename, char co
+@@ -1264,14 +1274,26 @@ do_statfs (char const *filename, char co
        return false;
      }
  
 +#if __CYGWIN__
 +  char *name_alt = NULL;
-+  if (append_exe && cygwin_spelling (filename) == 1)
++  if (append_exe && 0 < cygwin_spelling (filename))
 +    CYGWIN_APPEND_EXE (name_alt, filename);
 +#endif /* __CYGWIN__ */
 +
@@ -1300,22 +1182,22 @@
        return false;
      }
  
-   bool fail = print_it (format, filename, print_statfs, &statfsbuf);
+   bool fail = print_it (format, -1, filename, print_statfs, &statfsbuf);
 +#if __CYGWIN__
 +  freea (name_alt);
 +#endif /* __CYGWIN__ */
    return ! fail;
  }
  
-@@ -1195,6 +1217,7 @@ do_stat (char const *filename, char cons
-          char const *format2)
+@@ -1282,6 +1304,7 @@ do_stat (char const *filename, char cons
  {
+   int fd = STREQ (filename, "-") ? 0 : -1;
    struct stat statbuf;
 +  char *name_alt = NULL;
  
-   if (STREQ (filename, "-"))
+   if (0 <= fd)
      {
-@@ -1207,18 +1230,29 @@ do_stat (char const *filename, char cons
+@@ -1294,18 +1317,29 @@ do_stat (char const *filename, char cons
    /* We can't use the shorter
       (follow_links?stat:lstat) (filename, &statbug)
       since stat might be a function-like macro.  */
@@ -1327,15 +1209,15 @@
 -      error (0, errno, _("cannot stat %s"), quote (filename));
 -      return false;
 +      if ((follow_links
-+           ? stat (filename, &statbuf)
-+           : lstat (filename, &statbuf)) != 0)
-+        {
-+          error (0, errno, _("cannot stat %s"), quote (filename));
-+          return false;
-+        }
++	   ? stat (filename, &statbuf)
++	   : lstat (filename, &statbuf)) != 0)
++	{
++	  error (0, errno, _("cannot stat %s"), quote (filename));
++	  return false;
++	}
 +
 +#if __CYGWIN__
-+      if (append_exe && cygwin_spelling (filename) == 1)
++      if (append_exe && 0 < cygwin_spelling (filename))
 +        CYGWIN_APPEND_EXE (name_alt, filename);
 +#endif /* __CYGWIN__ */
      }
@@ -1343,15 +1225,15 @@
    if (S_ISBLK (statbuf.st_mode) || S_ISCHR (statbuf.st_mode))
      format = format2;
  
-   bool fail = print_it (format, filename, print_stat, &statbuf);
+   bool fail = print_it (format, fd, filename, print_stat, &statbuf);
 +#if __CYGWIN__
 +  freea (name_alt);
 +#endif /* __CYGWIN__ */
    return ! fail;
  }
  
-@@ -1342,6 +1376,11 @@ Display file or file system status.\n\
-                           If you want a newline, include \\n in FORMAT\n\
+@@ -1427,6 +1461,11 @@ Display file or file system status.\n\
+                           if you want a newline, include \\n in FORMAT\n\
    -t, --terse           print the information in terse form\n\
  "), stdout);
 +#if __CYGWIN__
@@ -1362,7 +1244,7 @@
        fputs (HELP_OPTION_DESCRIPTION, stdout);
        fputs (VERSION_OPTION_DESCRIPTION, stdout);
  
-@@ -1462,6 +1501,12 @@ main (int argc, char *argv[])
+@@ -1547,6 +1586,12 @@ main (int argc, char *argv[])
            terse = true;
            break;
  
@@ -1375,77 +1257,3 @@
          case_GETOPT_HELP_CHAR;
  
          case_GETOPT_VERSION_CHAR (PROGRAM_NAME, AUTHORS);
---- origsrc/coreutils-8.15/src/su.c	2012-01-01 02:04:06.000000000 -0700
-+++ src/coreutils-8.15/src/su.c	2012-02-04 13:13:50.734375000 -0700
-@@ -82,6 +82,12 @@
- 
- #include "error.h"
- 
-+#if __CYGWIN__
-+# undef DATADIR
-+# include <windows.h>
-+# include <sys/cygwin.h>
-+#endif /* __CYGWIN__ */
-+
- /* The official name of this program (e.g., no `g' prefix).  */
- #define PROGRAM_NAME "su"
- 
-@@ -226,12 +232,58 @@ correct_password (const struct passwd *p
-   if (getuid () == 0 || !correct || correct[0] == '\0')
-     return true;
- 
-+#if __CYGWIN__
-+  /* On cygwin, any process with enough privilege can do passwordless
-+     authentication.  http://cygwin.com/ml/cygwin/2006-01/msg00289.html
-+     shows how to grant these privileges to an arbitrary account,
-+     although this should only be done to trusted users.  */
-+
-+  /* I don't know of any good way to see if the current user has
-+     privileges for passwordless login, short of attempting it to see
-+     if it was possible.  This duplicates change_identity(), but
-+     failure is not fatal (because password login may still be
-+     possible).  */
-+  bool ok = true;
-+  errno = 0;
-+  if (initgroups (pw->pw_name, pw->pw_gid) == -1)
-+    ok = false;
-+  endgrent ();
-+  if (setgid (pw->pw_gid))
-+    ok = false;
-+  if (setuid (pw->pw_uid))
-+    ok = false;
-+  if (ok)
-+    return true;
-+#endif /* __CYGWIN__ */
-+
-   unencrypted = getpass (_("Password:"));
-   if (!unencrypted)
-     {
-       error (0, 0, _("getpass: cannot open /dev/tty"));
-       return false;
-     }
-+#if __CYGWIN__
-+  /* Windows NT class machines don't store password in pw->pw_passwd, but
-+     do support setuid if we use the cygwin password test.
-+     See http://cygwin.com/cygwin-ug-net/ntsec.html#ntsec-setuid.  */
-+  if (1)
-+    {
-+      HANDLE token;
-+      /* Try to get the access token from NT.  */
-+      errno = 0;
-+      token = cygwin_logon_user (pw, unencrypted);
-+      if (token == INVALID_HANDLE_VALUE)
-+        error (EXIT_FAILURE, errno, _("incorrect password, or insufficient "
-+                                      "privileges to change user (see\n"
-+                                      "   http://cygwin.com/cygwin-ug-net/"
-+                                      "ntsec.html#ntsec-setuid)"));
-+      /* Inform Cygwin about the new impersonation token.  Now cygwin is
-+         able to switch to that user context by setuid or seteuid calls.  */
-+      cygwin_set_impersonation_token (token);
-+      encrypted = correct;
-+    }
-+  else
-+#endif /* __CYGWIN__ */
-   encrypted = crypt (unencrypted, correct);
-   memset (unencrypted, 0, strlen (unencrypted));
-   return STREQ (encrypted, correct);
